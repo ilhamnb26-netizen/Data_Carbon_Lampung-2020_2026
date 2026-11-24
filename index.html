@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGIS Stok Karbon Lampung 2020–2026</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+    #header {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 1000;
+      background: #1b4332; color: #fff; padding: 10px 16px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    }
+    #header h1 { font-size: 18px; margin: 0; }
+    #header select { padding: 4px 8px; font-size: 14px; }
+    #map { position: absolute; top: 52px; bottom: 0; left: 0; right: 0; }
+    .legend, .info {
+      background: #fff; padding: 8px 12px; border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.3); font-size: 13px; line-height: 20px;
+    }
+    .legend i { width: 16px; height: 16px; float: left; margin-right: 8px; opacity: .85; }
+    .info h4 { margin: 0 0 4px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>Stok Karbon Provinsi Lampung</h1>
+    <label>Tahun:
+      <select id="tahun"></select>
+    </label>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // ===== PENGATURAN — sesuaikan dengan data kamu =====
+    const CONFIG = {
+      dataFile: 'data/karbon_lampung.geojson', // lokasi file GeoJSON
+      namaField: 'NAMOBJ',                     // kolom nama wilayah
+      tahun: [2020, 2021, 2022, 2023, 2024, 2025, 2026],
+      fieldPrefix: 'karbon_',                  // kolom: karbon_2020, karbon_2021, ...
+      satuan: 'ton C/ha',
+      kelas: [0, 25, 50, 100, 150, 200],       // batas kelas legenda
+      warna: ['#ffffcc', '#d9f0a3', '#addd8e', '#78c679', '#31a354', '#006837']
+    };
+    // ===================================================
+
+    const map = L.map('map').setView([-4.9, 105.2], 8);
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+    const citra = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Esri World Imagery' });
+    L.control.layers({ 'OpenStreetMap': osm, 'Citra Satelit': citra }).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
+
+    function getColor(v) {
+      if (v == null || isNaN(v)) return '#cccccc';
+      for (let i = CONFIG.kelas.length - 1; i >= 0; i--) {
+        if (v >= CONFIG.kelas[i]) return CONFIG.warna[i];
+      }
+      return CONFIG.warna[0];
+    }
+
+    // Dropdown tahun
+    const sel = document.getElementById('tahun');
+    CONFIG.tahun.forEach(t => sel.add(new Option(t, t)));
+    sel.value = CONFIG.tahun[CONFIG.tahun.length - 1];
+
+    // Panel info
+    const info = L.control({ position: 'topright' });
+    info.onAdd = function () { this._div = L.DomUtil.create('div', 'info'); this.update(); return this._div; };
+    info.update = function (p) {
+      const f = CONFIG.fieldPrefix + sel.value;
+      this._div.innerHTML = '<h4>Stok Karbon ' + sel.value + '</h4>' + (p
+        ? '<b>' + (p[CONFIG.namaField] ?? '-') + '</b><br>' +
+          (p[f] != null ? Number(p[f]).toLocaleString('id-ID') + ' ' + CONFIG.satuan : 'Tidak ada data')
+        : 'Arahkan kursor ke wilayah');
+    };
+    info.addTo(map);
+
+    // Legenda
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function () {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML = '<b>' + CONFIG.satuan + '</b><br>';
+      CONFIG.kelas.forEach((k, i) => {
+        const next = CONFIG.kelas[i + 1];
+        div.innerHTML += '<i style="background:' + CONFIG.warna[i] + '"></i>' +
+          k + (next != null ? '&ndash;' + next : '+') + '<br>';
+      });
+      return div;
+    };
+    legend.addTo(map);
+
+    let layer;
+    function style(feature) {
+      const v = feature.properties[CONFIG.fieldPrefix + sel.value];
+      return { fillColor: getColor(v), weight: 1, color: '#555', fillOpacity: 0.75 };
+    }
+
+    fetch(CONFIG.dataFile)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(data => {
+        layer = L.geoJSON(data, {
+          style,
+          onEachFeature: (f, l) => {
+            l.on({
+              mouseover: e => { e.target.setStyle({ weight: 3, color: '#000' }); info.update(f.properties); },
+              mouseout: e => { layer.resetStyle(e.target); info.update(); },
+              click: e => map.fitBounds(e.target.getBounds())
+            });
+          }
+        }).addTo(map);
+        map.fitBounds(layer.getBounds());
+      })
+      .catch(err => alert('Gagal memuat ' + CONFIG.dataFile + ' (' + err.message + ')'));
+
+    sel.addEventListener('change', () => { if (layer) layer.setStyle(style); info.update(); });
+  </script>
+</body>
+</html>
